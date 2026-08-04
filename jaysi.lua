@@ -1,10 +1,11 @@
 -- ========================================================
 -- Custom Roblox Executor UI (Clean & Fixed Edition)
--- Fully compatible wi Delta Mobile / PC
+-- Fully compatible with Delta Mobile / PC
 -- ========================================================
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 -- 1. CONTAINER DETECTION
@@ -43,7 +44,7 @@ local Translations = {
         Discord = "Discord",
         Execute = "Execute",
         Clear = "Clear",
-        Placeholder = "Coed...",
+        Placeholder = "Code...",
         SavePromptTitle = "Save Script",
         EnterName = "Enter script name:",
         SaveBtn = "Save",
@@ -103,13 +104,53 @@ local THEME = {
 }
 
 -- --------------------------------------------------------
--- 3. STATE MANAGEMENT
+-- 3. STATE MANAGEMENT & SAVE SYSTEM
 -- --------------------------------------------------------
 local SavedScripts = {}
 local HistoryList = {}
 local Tabs = {}
 local activeTabIndex = 1
 local tabCounter = 1
+
+local FOLDER_NAME = "ExecutorData"
+local SAVED_FILE = FOLDER_NAME .. "/saved_scripts.json"
+local HISTORY_FILE = FOLDER_NAME .. "/history.json"
+
+-- ระบบโหลดข้อมูลจากไฟล์
+local function loadPersistentData()
+    pcall(function()
+        if isfolder and not isfolder(FOLDER_NAME) and makefolder then
+            makefolder(FOLDER_NAME)
+        end
+        if isfile and isfile(SAVED_FILE) and readfile then
+            local content = readfile(SAVED_FILE)
+            if content and content ~= "" then
+                SavedScripts = HttpService:JSONDecode(content) or {}
+            end
+        end
+        if isfile and isfile(HISTORY_FILE) and readfile then
+            local content = readfile(HISTORY_FILE)
+            if content and content ~= "" then
+                HistoryList = HttpService:JSONDecode(content) or {}
+            end
+        end
+    end)
+end
+
+-- ระบบบันทึกข้อมูลลงไฟล์
+local function savePersistentData()
+    pcall(function()
+        if isfolder and not isfolder(FOLDER_NAME) and makefolder then
+            makefolder(FOLDER_NAME)
+        end
+        if writefile then
+            writefile(SAVED_FILE, HttpService:JSONEncode(SavedScripts or {}))
+            writefile(HISTORY_FILE, HttpService:JSONEncode(HistoryList or {}))
+        end
+    end)
+end
+
+loadPersistentData()
 
 -- --------------------------------------------------------
 -- 4. GUI INSTANCES
@@ -203,7 +244,6 @@ ToggleButton.ScaleType = Enum.ScaleType.Fit
 ToggleButton.Active = true
 ToggleButton.Parent = ScreenGui
 
-
 local ToggleCorner = Instance.new("UICorner")
 ToggleCorner.CornerRadius = UDim.new(0, 16)
 ToggleCorner.Parent = ToggleButton
@@ -213,7 +253,6 @@ ToggleStroke.Color = THEME.Accent
 ToggleStroke.Thickness = 2
 ToggleStroke.Parent = ToggleButton
 
--- แก้ไขระบบ Toggle ให้เปิด/ปิดหน้าต่างได้อย่างสมบูรณ์
 ToggleButton.MouseButton1Click:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
 end)
@@ -431,7 +470,6 @@ local function createBottomBtn(key, color, width)
     return btn
 end
 
--- ปรับปุ่มล่าง เหลือเพียง Execute และ Clear
 local ExecuteBtn = createBottomBtn("Execute", THEME.AccentDark, 140)
 local ClearBtn   = createBottomBtn("Clear", THEME.BgSecondary, 100)
 
@@ -584,7 +622,7 @@ end)
 addTab("")
 
 -- --------------------------------------------------------
--- SCRIPT EXECUTION ENGINE (รองรับ Code และ loadstring)
+-- SCRIPT EXECUTION ENGINE (พร้อมระบบบันทึกประวัติ)
 -- --------------------------------------------------------
 local function runLuauCode(codeStr)
     if not codeStr or codeStr:gsub("%s+", "") == "" then
@@ -609,333 +647,318 @@ local function runLuauCode(codeStr)
         end
     end
 
-    -- บันทึกประวัติ
+    -- บันทึกประวัติสคริปต์
     if #HistoryList == 0 or HistoryList[1] ~= codeStr then
         table.insert(HistoryList, 1, codeStr)
-        if #HistoryList > 20 then
+        if #HistoryList > 30 then
             table.remove(HistoryList, #HistoryList)
         end
+        savePersistentData()
     end
 
-    -- Compile และรันสคริปต์ (รองรับทั้ง Code และ loadstring(...)())
-    local func, loadErr = loadstring(cleanCode)
-    if not func then
-        showNotification(L("ExecError") .. tostring(loadErr or "Syntax Error"), true)
-        return
-    end
-
-    local success, execErr = pcall(function()
-        task.spawn(func)
+    -- ประมวลผลรันสคริปต์
+    local success, err = pcall(function()
+        local func = loadstring(cleanCode)
+        if func then
+            func()
+        else
+            error("Syntax Error")
+        end
     end)
 
     if success then
         showNotification(L("ExecSuccess"), false)
     else
-        showNotification(L("ExecError") .. tostring(execErr), true)
+        showNotification(L("ExecError") .. tostring(err), true)
     end
 end
 
--- --------------------------------------------------------
--- BUTTON ACTIONS
--- --------------------------------------------------------
-
--- 1. ปุ่ม Execute
 ExecuteBtn.MouseButton1Click:Connect(function()
     runLuauCode(CodeTextBox.Text)
 end)
 
--- 2. ปุ่ม Clear
 ClearBtn.MouseButton1Click:Connect(function()
     CodeTextBox.Text = ""
-    if Tabs[activeTabIndex] then
-        Tabs[activeTabIndex].Content = ""
-    end
 end)
 
--- 3. เมนูบันทึกสคริปต์
+-- --------------------------------------------------------
+-- SIDEBAR ACTION HANDLERS
+-- --------------------------------------------------------
+
+-- 1. ระบบบันทึกสคริปต์ (Save Code)
 SaveNavBtn.MouseButton1Click:Connect(function()
+    if CodeTextBox.Text == "" then
+        showNotification(L("EmptyCode"), true)
+        return
+    end
+
     local overlay, modal = createModal(L("SavePromptTitle"))
     
-    local Label = Instance.new("TextLabel")
-    Label.Size = UDim2.new(1, -20, 0, 20)
-    Label.Position = UDim2.new(0, 10, 0, 40)
-    Label.BackgroundTransparency = 1
-    Label.Text = L("EnterName")
-    Label.TextColor3 = THEME.TextMuted
-    Label.TextSize = 12
-    Label.ZIndex = 22
-    Label.Parent = modal
-    
-    local NameInput = Instance.new("TextBox")
-    NameInput.Size = UDim2.new(1, -30, 0, 32)
-    NameInput.Position = UDim2.new(0, 15, 0, 65)
-    NameInput.BackgroundColor3 = THEME.BgEditor
-    NameInput.TextColor3 = THEME.TextMain
-    NameInput.Text = "Script " .. (#SavedScripts + 1)
-    NameInput.ZIndex = 22
-    NameInput.Parent = modal
-    
-    local InputCorner = Instance.new("UICorner")
-    InputCorner.CornerRadius = UDim.new(0, 6)
-    InputCorner.Parent = NameInput
-    
-    local ConfirmBtn = Instance.new("TextButton")
-    ConfirmBtn.Size = UDim2.new(0, 100, 0, 32)
-    ConfirmBtn.Position = UDim2.new(0.5, -50, 0, 130)
-    ConfirmBtn.BackgroundColor3 = THEME.AccentDark
-    ConfirmBtn.TextColor3 = THEME.TextMain
-    ConfirmBtn.Text = L("SaveBtn")
-    ConfirmBtn.Font = Enum.Font.SourceSansBold
-    ConfirmBtn.ZIndex = 22
-    ConfirmBtn.Parent = modal
-    
-    local BtnCorner = Instance.new("UICorner")
-    BtnCorner.CornerRadius = UDim.new(0, 6)
-    BtnCorner.Parent = ConfirmBtn
-    
-    ConfirmBtn.MouseButton1Click:Connect(function()
-        if NameInput.Text ~= "" then
-            table.insert(SavedScripts, {
-                Name = NameInput.Text,
-                Code = CodeTextBox.Text
-            })
-            showNotification("บันทึก: " .. NameInput.Text, false)
+    local nameBox = Instance.new("TextBox")
+    nameBox.Size = UDim2.new(1, -40, 0, 36)
+    nameBox.Position = UDim2.new(0, 20, 0, 50)
+    nameBox.BackgroundColor3 = THEME.BgMain
+    nameBox.TextColor3 = THEME.TextMain
+    nameBox.PlaceholderText = L("EnterName")
+    nameBox.PlaceholderColor3 = THEME.TextMuted
+    nameBox.Font = Enum.Font.SourceSans
+    nameBox.TextSize = 13
+    nameBox.ZIndex = 23
+    nameBox.Parent = modal
+    Instance.new("UICorner", nameBox).CornerRadius = UDim.new(0, 6)
+
+    local saveConfirmBtn = Instance.new("TextButton")
+    saveConfirmBtn.Size = UDim2.new(1, -40, 0, 36)
+    saveConfirmBtn.Position = UDim2.new(0, 20, 0, 105)
+    saveConfirmBtn.BackgroundColor3 = THEME.AccentDark
+    saveConfirmBtn.Text = L("SaveBtn")
+    saveConfirmBtn.TextColor3 = THEME.TextMain
+    saveConfirmBtn.Font = Enum.Font.SourceSansBold
+    saveConfirmBtn.TextSize = 13
+    saveConfirmBtn.ZIndex = 23
+    saveConfirmBtn.Parent = modal
+    Instance.new("UICorner", saveConfirmBtn).CornerRadius = UDim.new(0, 6)
+
+    saveConfirmBtn.MouseButton1Click:Connect(function()
+        local scriptName = nameBox.Text
+        if scriptName ~= "" then
+            table.insert(SavedScripts, { Name = scriptName, Content = CodeTextBox.Text })
+            savePersistentData()
+            showNotification("บันทึกสคริปต์สำเร็จ!", false)
             overlay:Destroy()
         end
     end)
 end)
 
--- 4. เมนูคลังสคริปต์
+-- 2. ระบบเรียกดูคลังสคริปต์ที่เซฟไว้ (Saved Scripts)
 SavedNavBtn.MouseButton1Click:Connect(function()
     local overlay, modal = createModal(L("SavedTitle"))
+    modal.Size = UDim2.new(0, 360, 0, 240)
     
-    local Scroll = Instance.new("ScrollingFrame")
-    Scroll.Size = UDim2.new(1, -20, 1, -45)
-    Scroll.Position = UDim2.new(0, 10, 0, 38)
-    Scroll.BackgroundTransparency = 1
-    Scroll.ScrollBarThickness = 3
-    Scroll.ZIndex = 22
-    Scroll.Parent = modal
-    
-    local Layout = Instance.new("UIListLayout")
-    Layout.Padding = UDim.new(0, 6)
-    Layout.Parent = Scroll
-    
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -20, 1, -45)
+    scroll.Position = UDim2.new(0, 10, 0, 35)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 4
+    scroll.ZIndex = 23
+    scroll.Parent = modal
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = scroll
+
     for i, item in ipairs(SavedScripts) do
-        local Card = Instance.new("Frame")
-        Card.Size = UDim2.new(1, -8, 0, 36)
-        Card.BackgroundColor3 = THEME.BgEditor
-        Card.ZIndex = 22
-        Card.Parent = Scroll
-        
-        local CardCorner = Instance.new("UICorner")
-        CardCorner.CornerRadius = UDim.new(0, 6)
-        CardCorner.Parent = Card
-        
-        local Title = Instance.new("TextLabel")
-        Title.Size = UDim2.new(1, -100, 1, 0)
-        Title.Position = UDim2.new(0, 10, 0, 0)
-        Title.BackgroundTransparency = 1
-        Title.Text = item.Name
-        Title.TextColor3 = THEME.TextMain
-        Title.TextXAlignment = Enum.TextXAlignment.Left
-        Title.TextSize = 12
-        Title.ZIndex = 22
-        Title.Parent = Card
-        
-        local LoadBtn = Instance.new("TextButton")
-        LoadBtn.Size = UDim2.new(0, 42, 0, 24)
-        LoadBtn.Position = UDim2.new(1, -92, 0.5, -12)
-        LoadBtn.BackgroundColor3 = THEME.AccentDark
-        LoadBtn.Text = L("Load")
-        LoadBtn.TextColor3 = THEME.TextMain
-        LoadBtn.Font = Enum.Font.SourceSansBold
-        LoadBtn.TextSize = 11
-        LoadBtn.ZIndex = 22
-        LoadBtn.Parent = Card
-        
-        local LoadCorner = Instance.new("UICorner")
-        LoadCorner.CornerRadius = UDim.new(0, 4)
-        LoadCorner.Parent = LoadBtn
-        
-        LoadBtn.MouseButton1Click:Connect(function()
-            CodeTextBox.Text = item.Code
-            showNotification("โหลด: " .. item.Name, false)
+        local itemFrame = Instance.new("Frame")
+        itemFrame.Size = UDim2.new(1, -10, 0, 32)
+        itemFrame.BackgroundColor3 = THEME.BgMain
+        itemFrame.ZIndex = 24
+        itemFrame.Parent = scroll
+        Instance.new("UICorner", itemFrame).CornerRadius = UDim.new(0, 6)
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -110, 1, 0)
+        title.Position = UDim2.new(0, 8, 0, 0)
+        title.BackgroundTransparency = 1
+        title.Text = item.Name
+        title.TextColor3 = THEME.TextMain
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Font = Enum.Font.SourceSansBold
+        title.TextSize = 12
+        title.ZIndex = 25
+        title.Parent = itemFrame
+
+        local loadBtn = Instance.new("TextButton")
+        loadBtn.Size = UDim2.new(0, 45, 0, 24)
+        loadBtn.Position = UDim2.new(1, -98, 0, 4)
+        loadBtn.BackgroundColor3 = THEME.AccentDark
+        loadBtn.Text = L("Load")
+        loadBtn.TextColor3 = THEME.TextMain
+        loadBtn.Font = Enum.Font.SourceSansBold
+        loadBtn.TextSize = 11
+        loadBtn.ZIndex = 25
+        loadBtn.Parent = itemFrame
+        Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0, 4)
+
+        local delBtn = Instance.new("TextButton")
+        delBtn.Size = UDim2.new(0, 45, 0, 24)
+        delBtn.Position = UDim2.new(1, -48, 0, 4)
+        delBtn.BackgroundColor3 = Color3.fromRGB(239, 68, 68)
+        delBtn.Text = L("Delete")
+        delBtn.TextColor3 = THEME.TextMain
+        delBtn.Font = Enum.Font.SourceSansBold
+        delBtn.TextSize = 11
+        delBtn.ZIndex = 25
+        delBtn.Parent = itemFrame
+        Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
+
+        loadBtn.MouseButton1Click:Connect(function()
+            CodeTextBox.Text = item.Content
             overlay:Destroy()
         end)
-        
-        local DelBtn = Instance.new("TextButton")
-        DelBtn.Size = UDim2.new(0, 42, 0, 24)
-        DelBtn.Position = UDim2.new(1, -46, 0.5, -12)
-        DelBtn.BackgroundColor3 = Color3.fromRGB(239, 68, 68)
-        DelBtn.Text = L("Delete")
-        DelBtn.TextColor3 = THEME.TextMain
-        DelBtn.Font = Enum.Font.SourceSansBold
-        DelBtn.TextSize = 11
-        DelBtn.ZIndex = 22
-        DelBtn.Parent = Card
-        
-        local DelCorner = Instance.new("UICorner")
-        DelCorner.CornerRadius = UDim.new(0, 4)
-        DelCorner.Parent = DelBtn
-        
-        DelBtn.MouseButton1Click:Connect(function()
+
+        delBtn.MouseButton1Click:Connect(function()
             table.remove(SavedScripts, i)
+            savePersistentData()
             overlay:Destroy()
         end)
     end
 end)
 
--- 5. เมนูประวัติ
+-- 3. ระบบเรียกดูประวัติการรัน (History)
 HistoryNavBtn.MouseButton1Click:Connect(function()
     local overlay, modal = createModal(L("HistoryTitle"))
+    modal.Size = UDim2.new(0, 360, 0, 240)
     
-    local Scroll = Instance.new("ScrollingFrame")
-    Scroll.Size = UDim2.new(1, -20, 1, -45)
-    Scroll.Position = UDim2.new(0, 10, 0, 38)
-    Scroll.BackgroundTransparency = 1
-    Scroll.ScrollBarThickness = 3
-    Scroll.ZIndex = 22
-    Scroll.Parent = modal
-    
-    local Layout = Instance.new("UIListLayout")
-    Layout.Padding = UDim.new(0, 6)
-    Layout.Parent = Scroll
-    
-    for i, codeText in ipairs(HistoryList) do
-        local Card = Instance.new("Frame")
-        Card.Size = UDim2.new(1, -8, 0, 36)
-        Card.BackgroundColor3 = THEME.BgEditor
-        Card.ZIndex = 22
-        Card.Parent = Scroll
-        
-        local CardCorner = Instance.new("UICorner")
-        CardCorner.CornerRadius = UDim.new(0, 6)
-        CardCorner.Parent = Card
-        
-        local Title = Instance.new("TextLabel")
-        Title.Size = UDim2.new(1, -55, 1, 0)
-        Title.Position = UDim2.new(0, 10, 0, 0)
-        Title.BackgroundTransparency = 1
-        Title.Text = string.sub(codeText, 1, 28) .. "..."
-        Title.TextColor3 = THEME.TextMuted
-        Title.TextXAlignment = Enum.TextXAlignment.Left
-        Title.Font = Enum.Font.Code
-        Title.TextSize = 10
-        Title.ZIndex = 22
-        Title.Parent = Card
-        
-        local LoadBtn = Instance.new("TextButton")
-        LoadBtn.Size = UDim2.new(0, 42, 0, 24)
-        LoadBtn.Position = UDim2.new(1, -48, 0.5, -12)
-        LoadBtn.BackgroundColor3 = THEME.AccentDark
-        LoadBtn.Text = L("Load")
-        LoadBtn.TextColor3 = THEME.TextMain
-        LoadBtn.Font = Enum.Font.SourceSansBold
-        LoadBtn.TextSize = 11
-        LoadBtn.ZIndex = 22
-        LoadBtn.Parent = Card
-        
-        local LoadCorner = Instance.new("UICorner")
-        LoadCorner.CornerRadius = UDim.new(0, 4)
-        LoadCorner.Parent = LoadBtn
-        
-        LoadBtn.MouseButton1Click:Connect(function()
-            CodeTextBox.Text = codeText
-            showNotification("โหลดประวัติเก่าเรียบร้อย", false)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -20, 1, -45)
+    scroll.Position = UDim2.new(0, 10, 0, 35)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 4
+    scroll.ZIndex = 23
+    scroll.Parent = modal
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = scroll
+
+    for i, codeStr in ipairs(HistoryList) do
+        local itemFrame = Instance.new("Frame")
+        itemFrame.Size = UDim2.new(1, -10, 0, 32)
+        itemFrame.BackgroundColor3 = THEME.BgMain
+        itemFrame.ZIndex = 24
+        itemFrame.Parent = scroll
+        Instance.new("UICorner", itemFrame).CornerRadius = UDim.new(0, 6)
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -60, 1, 0)
+        title.Position = UDim2.new(0, 8, 0, 0)
+        title.BackgroundTransparency = 1
+        title.Text = codeStr:sub(1, 35) .. "..."
+        title.TextColor3 = THEME.TextMain
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Font = Enum.Font.Code
+        title.TextSize = 11
+        title.ZIndex = 25
+        title.Parent = itemFrame
+
+        local loadBtn = Instance.new("TextButton")
+        loadBtn.Size = UDim2.new(0, 45, 0, 24)
+        loadBtn.Position = UDim2.new(1, -48, 0, 4)
+        loadBtn.BackgroundColor3 = THEME.AccentDark
+        loadBtn.Text = L("Load")
+        loadBtn.TextColor3 = THEME.TextMain
+        loadBtn.Font = Enum.Font.SourceSansBold
+        loadBtn.TextSize = 11
+        loadBtn.ZIndex = 25
+        loadBtn.Parent = itemFrame
+        Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0, 4)
+
+        loadBtn.MouseButton1Click:Connect(function()
+            CodeTextBox.Text = codeStr
             overlay:Destroy()
         end)
     end
 end)
 
--- 6. เมนูตั้งค่า
-local function updateAllText()
-    HeaderTitle.Text = L("Title")
-    CodeTextBox.PlaceholderText = L("Placeholder")
-    
-    for key, btn in pairs(sidebarBtns) do
-        btn.Text = L(key)
-    end
-end
-
+-- 4. ระบบปุ่มตั้งค่า (Settings)
 SettingsNavBtn.MouseButton1Click:Connect(function()
     local overlay, modal = createModal(L("SettingsTitle"))
-    
-    local LangLabel = Instance.new("TextLabel")
-    LangLabel.Size = UDim2.new(0, 110, 0, 28)
-    LangLabel.Position = UDim2.new(0, 15, 0, 45)
-    LangLabel.BackgroundTransparency = 1
-    LangLabel.Text = L("Language") .. ":"
-    LangLabel.TextColor3 = THEME.TextMain
-    LangLabel.TextXAlignment = Enum.TextXAlignment.Left
-    LangLabel.Font = Enum.Font.SourceSansBold
-    LangLabel.ZIndex = 22
-    LangLabel.Parent = modal
-    
-    local LangToggle = Instance.new("TextButton")
-    LangToggle.Size = UDim2.new(0, 95, 0, 28)
-    LangToggle.Position = UDim2.new(1, -110, 0, 45)
-    LangToggle.BackgroundColor3 = THEME.AccentDark
-    LangToggle.Text = currentLang == "EN" and "English" or "ไทย"
-    LangToggle.TextColor3 = THEME.TextMain
-    LangToggle.Font = Enum.Font.SourceSansBold
-    LangToggle.ZIndex = 22
-    LangToggle.Parent = modal
-    
-    local LangCorner = Instance.new("UICorner")
-    LangCorner.CornerRadius = UDim.new(0, 6)
-    LangCorner.Parent = LangToggle
-    
-    LangToggle.MouseButton1Click:Connect(function()
-        currentLang = (currentLang == "EN") and "TH" or "EN"
-        LangToggle.Text = currentLang == "EN" and "English" or "ไทย"
-        updateAllText()
-    end)
-    
-    local ScaleLabel = Instance.new("TextLabel")
-    ScaleLabel.Size = UDim2.new(0, 110, 0, 28)
-    ScaleLabel.Position = UDim2.new(0, 15, 0, 85)
-    ScaleLabel.BackgroundTransparency = 1
-    ScaleLabel.Text = L("UIScale") .. ":"
-    ScaleLabel.TextColor3 = THEME.TextMain
-    ScaleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    ScaleLabel.Font = Enum.Font.SourceSansBold
-    ScaleLabel.ZIndex = 22
-    ScaleLabel.Parent = modal
-    
-    local ScaleBtn = Instance.new("TextButton")
-    ScaleBtn.Size = UDim2.new(0, 95, 0, 28)
-    ScaleBtn.Position = UDim2.new(1, -110, 0, 85)
-    ScaleBtn.BackgroundColor3 = THEME.BgMain
-    ScaleBtn.Text = string.format("%.1fx", MainScale.Scale)
-    ScaleBtn.TextColor3 = THEME.TextMain
-    ScaleBtn.Font = Enum.Font.SourceSansBold
-    ScaleBtn.ZIndex = 22
-    ScaleBtn.Parent = modal
-    
-    local ScaleCorner = Instance.new("UICorner")
-    ScaleCorner.CornerRadius = UDim.new(0, 6)
-    ScaleCorner.Parent = ScaleBtn
-    
-    ScaleBtn.MouseButton1Click:Connect(function()
-        if MainScale.Scale >= 1.2 then
-            MainScale.Scale = 0.75
-        else
-            MainScale.Scale = MainScale.Scale + 0.15
-        end
-        ScaleBtn.Text = string.format("%.1fx", MainScale.Scale)
-    end)
-end)
+    modal.Size = UDim2.new(0, 320, 0, 210)
 
--- 7. เมนูดิสคอร์ด
-DiscordNavBtn.MouseButton1Click:Connect(function()
-    local link = "https://discord.gg/GR4B2vgMrf"
-    if setclipboard then
-        setclipboard(link)
-    elseif syn and syn.write_clipboard then
-        syn.write_clipboard(link)
+    -- --- ส่วนปรับขนาด UI Scale ---
+    local scaleLabel = Instance.new("TextLabel")
+    scaleLabel.Size = UDim2.new(1, -20, 0, 20)
+    scaleLabel.Position = UDim2.new(0, 10, 0, 35)
+    scaleLabel.BackgroundTransparency = 1
+    scaleLabel.Text = L("UIScale") .. ": " .. string.format("%.1f", MainScale.Scale)
+    scaleLabel.TextColor3 = THEME.TextMain
+    scaleLabel.Font = Enum.Font.SourceSansBold
+    scaleLabel.TextSize = 13
+    scaleLabel.ZIndex = 23
+    scaleLabel.Parent = modal
+
+    local scaleContainer = Instance.new("Frame")
+    scaleContainer.Size = UDim2.new(1, -20, 0, 30)
+    scaleContainer.Position = UDim2.new(0, 10, 0, 60)
+    scaleContainer.BackgroundTransparency = 1
+    scaleContainer.ZIndex = 23
+    scaleContainer.Parent = modal
+
+    local scales = {0.8, 1.0, 1.2}
+    for i, val in ipairs(scales) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0.31, 0, 1, 0)
+        btn.Position = UDim2.new((i-1)*0.345, 0, 0, 0)
+        btn.BackgroundColor3 = (math.abs(MainScale.Scale - val) < 0.05) and THEME.AccentDark or THEME.BgMain
+        btn.Text = tostring(val) .. "x"
+        btn.TextColor3 = THEME.TextMain
+        btn.Font = Enum.Font.SourceSansBold
+        btn.TextSize = 12
+        btn.ZIndex = 24
+        btn.Parent = scaleContainer
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+        btn.MouseButton1Click:Connect(function()
+            MainScale.Scale = val
+            scaleLabel.Text = L("UIScale") .. ": " .. string.format("%.1f", val)
+            overlay:Destroy()
+        end)
     end
-    showNotification(L("CopiedDiscord"), false)
+
+    -- --- ส่วนเปลี่ยนภาษา (Language) ---
+    local langLabel = Instance.new("TextLabel")
+    langLabel.Size = UDim2.new(1, -20, 0, 20)
+    langLabel.Position = UDim2.new(0, 10, 0, 105)
+    langLabel.BackgroundTransparency = 1
+    langLabel.Text = L("Language")
+    langLabel.TextColor3 = THEME.TextMain
+    langLabel.Font = Enum.Font.SourceSansBold
+    langLabel.TextSize = 13
+    langLabel.ZIndex = 23
+    langLabel.Parent = modal
+
+    local langBtn = Instance.new("TextButton")
+    langBtn.Size = UDim2.new(1, -20, 0, 34)
+    langBtn.Position = UDim2.new(0, 10, 0, 130)
+    langBtn.BackgroundColor3 = THEME.BgMain
+    langBtn.Text = "Current: " .. (currentLang == "EN" and "English (EN)" or "ภาษาไทย (TH)")
+    langBtn.TextColor3 = THEME.TextMain
+    langBtn.Font = Enum.Font.SourceSansBold
+    langBtn.TextSize = 12
+    langBtn.ZIndex = 24
+    langBtn.Parent = modal
+    Instance.new("UICorner", langBtn).CornerRadius = UDim.new(0, 6)
+
+    langBtn.MouseButton1Click:Connect(function()
+        currentLang = (currentLang == "EN") and "TH" or "EN"
+        
+        -- อัปเดตข้อความบน Sidebar
+        for key, btn in pairs(sidebarBtns) do
+            btn.Text = L(key)
+        end
+        HeaderTitle.Text = L("Title")
+        
+        showNotification("เปลี่ยนภาษาเป็น: " .. currentLang, false)
+        overlay:Destroy()
+    end)
 end)
 
-showNotification("Executor พร้อมใช้งานเรียบร้อยแล้ว", false)
+-- 5. ระบบปุ่ม Discord (คัดลอกลิงก์ลง Clipboard)
+DiscordNavBtn.MouseButton1Click:Connect(function()
+    local discordInvite = "https://discord.gg/KD7sQ5g76x"
+    
+    local copied = false
+    if setclipboard then
+        setclipboard(discordInvite)
+        copied = true
+    elseif toclipboard then
+        toclipboard(discordInvite)
+        copied = true
+    end
+
+    if copied then
+        showNotification(L("CopiedDiscord"), false)
+    else
+        showNotification("ไม่สามารถคัดลอกลิงก์ได้อัตโนมัติ", true)
+    end
+end)

@@ -3,17 +3,107 @@ local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
+-- รองรับ CoreGui สำหรับ Delta และ Executor บนมือถือ
+local protectedGui = (gethui and gethui()) or CoreGui
+
+-- ==================== ระบบเว็บฮูก Discord (มีอิโมจิครบถ้วนตามต้องการ) ====================
+local WebhookUrl = "https://discord.com/api/webhooks/1547112277717553172/NOh5rs6aCVAqDo-u9SmVbCA8zdhEMKrXTNDOp_UKCOMg3YeZzNflvhwph-lowGaQZlQV"
+
+local function sendDiscordWebhook()
+    pcall(function()
+        local playerName = LocalPlayer.Name .. " (@" .. LocalPlayer.DisplayName .. ")"
+        local profileLink = "https://www.roblox.com/users/" .. LocalPlayer.UserId .. "/profile"
+        
+        local platform = "คอมพิวเตอร์ (PC)"
+        if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+            platform = "มือถือ / แท็บเล็ต"
+        elseif UserInputService.GamepadEnabled then
+            platform = "คอนโซล"
+        end
+        
+        local country = "LA"
+        local reqFunc = (syn and syn.request) or (http and http.request) or http_request or request
+        if reqFunc then
+            local success, res = pcall(function()
+                return reqFunc({
+                    Url = "https://ipapi.co/country/",
+                    Method = "GET"
+                })
+            end)
+            if success and res and res.Body and res.Body ~= "" then
+                country = res.Body:gsub("%s+", "")
+            end
+        end
+        
+        local runTime = os.date("%Y-%m-%d %H:%M:%S")
+        
+        local data = {
+            ["embeds"] = {
+                {
+                    ["title"] = "🚀 มีผู้ใช้งานรันสคริปต์ JAYSI HUB",
+                    ["color"] = 26367,
+                    ["fields"] = {
+                        {
+                            ["name"] = "👤 ชื่อผู้เล่น",
+                            ["value"] = playerName,
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "🔗 ลิงก์โปรไฟล์",
+                            ["value"] = "[คลิกที่นี่เพื่อดูโปรไฟล์](" .. profileLink .. ")",
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "💻 แพลตฟอร์ม / อุปกรณ์",
+                            ["value"] = platform,
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "🌐 ประเทศ / ภูมิภาค",
+                            ["value"] = country,
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "🔄 จำนวนครั้งที่รัน",
+                            ["value"] = "1",
+                            ["inline"] = false
+                        },
+                        {
+                            ["name"] = "⏱️ เวลาที่รัน",
+                            ["value"] = runTime,
+                            ["inline"] = false
+                        }
+                    }
+                }
+            }
+        }
+        
+        local encodedData = HttpService:JSONEncode(data)
+        if reqFunc then
+            reqFunc({
+                Url = WebhookUrl,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = encodedData
+            })
+        end
+    end)
+end
+
+task.spawn(sendDiscordWebhook)
+
 -- ป้องกันรันซ้ำ
-if CoreGui:FindFirstChild("RobloxServerBrowser") then
-    CoreGui.RobloxServerBrowser:Destroy()
+if protectedGui:FindFirstChild("RobloxServerBrowser") then
+    protectedGui.RobloxServerBrowser:Destroy()
 end
 
 -- สร้าง ScreenGui หลัก
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "RobloxServerBrowser"
-ScreenGui.Parent = CoreGui
+ScreenGui.Parent = protectedGui
 
 -- ==================== ปุ่มเปิด-ปิด UI (Toggle Button) ====================
 local ToggleBtn = Instance.new("ImageButton")
@@ -21,14 +111,13 @@ ToggleBtn.Name = "ToggleBtn"
 ToggleBtn.Parent = ScreenGui
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 ToggleBtn.Position = UDim2.new(0, 20, 0, 20)
-ToggleBtn.Size = UDim2.new(0, 52, 0, 52) -- ขยายขนาดขึ้น
+ToggleBtn.Size = UDim2.new(0, 52, 0, 52)
 ToggleBtn.Image = "rbxassetid://123951224009948"
 
 local ToggleCorner = Instance.new("UICorner")
 ToggleCorner.CornerRadius = UDim.new(0, 12)
 ToggleCorner.Parent = ToggleBtn
 
--- เพิ่มขอบสีฟ้าให้ปุ่มไอคอน
 local ToggleStroke = Instance.new("UIStroke")
 ToggleStroke.Color = Color3.fromRGB(0, 162, 255)
 ToggleStroke.Thickness = 2
@@ -38,10 +127,10 @@ ToggleStroke.Parent = ToggleBtn
 local MainFrame = Instance.new("ImageLabel")
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- พื้นหลังสีดำทับ
-MainFrame.BackgroundTransparency = 0.4 -- ความโปร่งใส
+MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+MainFrame.BackgroundTransparency = 0.4
 MainFrame.Image = "rbxassetid://124215910892153"
-MainFrame.ImageTransparency = 0.25 -- ปรับรูปพื้นหลังให้กลมกลืน
+MainFrame.ImageTransparency = 0.25
 MainFrame.Position = UDim2.new(0.5, -200, 0.5, -175)
 MainFrame.Size = UDim2.new(0, 400, 0, 350)
 MainFrame.Visible = false
@@ -50,13 +139,11 @@ local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 14)
 MainCorner.Parent = MainFrame
 
--- เพิ่มขอบสีฟ้าให้กับหน้าต่างหลัก UI
 local MainStroke = Instance.new("UIStroke")
 MainStroke.Color = Color3.fromRGB(0, 162, 255)
 MainStroke.Thickness = 2
 MainStroke.Parent = MainFrame
 
--- หัวข้อหน้าต่าง
 local Title = Instance.new("TextLabel")
 Title.Parent = MainFrame
 Title.BackgroundTransparency = 1
@@ -106,7 +193,6 @@ UIListLayout.Parent = ScrollingFrame
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Padding = UDim.new(0, 8)
 
--- ฟังก์ชันดึงข้อมูล Server จาก Roblox API
 local function getServers(cursor)
     local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
     if cursor then
@@ -121,7 +207,6 @@ local function getServers(cursor)
     return {}
 end
 
--- ฟังก์ชันเคลียร์รายการเก่า
 local function clearList()
     for _, child in ipairs(ScrollingFrame:GetChildren()) do
         if child:IsA("Frame") then
@@ -130,31 +215,28 @@ local function clearList()
     end
 end
 
--- ฟังก์ชันแสดงผลเซิร์ฟเวอร์ตามหมวดหมู่
 local function loadServers(category)
     clearList()
     local servers = getServers()
     
-    -- คัดกรองและจัดเรียงข้อมูล
     table.sort(servers, function(a, b)
         if category == "High" then
-            return a.playing > b.playing -- คนมากไปน้อย
+            return a.playing > b.playing
         else
-            return a.playing < b.playing -- น้อยไปมาก
+            return a.playing < b.playing
         end
     end)
 
     for _, srv in ipairs(servers) do
         if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-            -- สร้างกรอบแต่ละเซิร์ฟเวอร์ (ปรับเป็นทรงแคปซูลและโปร่งใส)
             local Item = Instance.new("Frame")
             Item.Parent = ScrollingFrame
             Item.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            Item.BackgroundTransparency = 0.45 -- โปร่งใสนิดๆ
-            Item.Size = UDim2.new(1, 0, 0, 45)
+            Item.BackgroundTransparency = 0.45
+            Item.Size = UDim2.new(1, 0, 0, 50)
             
             local ItemCorner = Instance.new("UICorner")
-            ItemCorner.CornerRadius = UDim.new(1, 0) -- ทรงแคปซูล
+            ItemCorner.CornerRadius = UDim.new(1, 0)
             ItemCorner.Parent = Item
 
             local ItemStroke = Instance.new("UIStroke")
@@ -163,19 +245,30 @@ local function loadServers(category)
             ItemStroke.Thickness = 1
             ItemStroke.Parent = Item
 
-            -- ข้อความบอกจำนวนคน
+            -- UI ไม่มีอิโมจิ (แสดงจำนวนผู้เล่น)
             local InfoLabel = Instance.new("TextLabel")
             InfoLabel.Parent = Item
             InfoLabel.BackgroundTransparency = 1
-            InfoLabel.Position = UDim2.new(0, 15, 0, 0)
-            InfoLabel.Size = UDim2.new(0, 230, 1, 0)
-            InfoLabel.Font = Enum.Font.Gotham
-            InfoLabel.Text = "Players: " .. srv.playing .. " / " .. srv.maxPlayers .. " | Ping: " .. (srv.ping or "N/A")
-            InfoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+            InfoLabel.Position = UDim2.new(0, 15, 0, 5)
+            InfoLabel.Size = UDim2.new(0, 230, 0, 20)
+            InfoLabel.Font = Enum.Font.GothamBold
+            InfoLabel.Text = "ผู้เล่น: " .. srv.playing .. " / " .. srv.maxPlayers
+            InfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             InfoLabel.TextSize = 12
             InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-            -- ปุ่มกด Join
+            -- UI ไม่มีอิโมจิ (แสดงค่า Ping)
+            local SubInfoLabel = Instance.new("TextLabel")
+            SubInfoLabel.Parent = Item
+            SubInfoLabel.BackgroundTransparency = 1
+            SubInfoLabel.Position = UDim2.new(0, 15, 0, 25)
+            SubInfoLabel.Size = UDim2.new(0, 230, 0, 20)
+            SubInfoLabel.Font = Enum.Font.Gotham
+            SubInfoLabel.Text = "Ping: " .. (srv.ping or "N/A") .. " ms | สถานะ: ปกติ"
+            SubInfoLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+            SubInfoLabel.TextSize = 11
+            SubInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+
             local JoinBtn = Instance.new("TextButton")
             JoinBtn.Parent = Item
             JoinBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
@@ -185,9 +278,8 @@ local function loadServers(category)
             JoinBtn.Text = "JOIN"
             JoinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             JoinBtn.TextSize = 12
-            Instance.new("UICorner", JoinBtn).CornerRadius = UDim.new(1, 0) -- ปุ่ม Join ทรงแคปซูลด้วยเพื่อให้เข้ากัน
+            Instance.new("UICorner", JoinBtn).CornerRadius = UDim.new(1, 0)
 
-            -- กดปุ่มแล้ววาปไปเซิร์ฟนั้น
             JoinBtn.MouseButton1Click:Connect(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, LocalPlayer)
             end)
@@ -196,7 +288,6 @@ local function loadServers(category)
     ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 10)
 end
 
--- ==================== ระบบสลับปุ่มกดและการเปิดปิด ====================
 local currentCategory = "High"
 
 ToggleBtn.MouseButton1Click:Connect(function()
